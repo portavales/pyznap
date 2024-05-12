@@ -17,7 +17,7 @@ import pyznap.pyzfs as zfs
 from .process import DatasetBusyError, DatasetNotFoundError, DatasetExistsError
 
 
-def take_snap(filesystem, _type):
+def take_snap(filesystem, _type, recursive=True):
     """Takes a snapshot of type '_type'
 
     Parameters
@@ -35,7 +35,7 @@ def take_snap(filesystem, _type):
 
     logger.info('Taking snapshot {}@{:s}...'.format(filesystem, snapname(_type)))
     try:
-        filesystem.snapshot(snapname=snapname(_type), recursive=True)
+        filesystem.snapshot(snapname=snapname(_type), recursive=recursive)
     except (DatasetBusyError, DatasetExistsError) as err:
         logger.error(err)
     except CalledProcessError as err:
@@ -85,34 +85,38 @@ def take_filesystem(filesystem, conf):
     for snaps in snapshots.values():
         snaps.reverse()
 
+    recursive = True  # Default to recursive snapshots
+    if 'recursive' in conf and conf['recursive'] is not None and conf['recursive'] == False:
+        recursive = False
+
     if conf['yearly'] and (not snapshots['yearly'] or
                            snapshots['yearly'][0][1].year != now().year):
-        take_snap(filesystem, 'yearly')
+        take_snap(filesystem, 'yearly', recursive)
 
     if conf['monthly'] and (not snapshots['monthly'] or
                             snapshots['monthly'][0][1].month != now().month or
                             now() - snapshots['monthly'][0][1] > timedelta(days=31)):
-        take_snap(filesystem, 'monthly')
+        take_snap(filesystem, 'monthly', recursive)
 
     if conf['weekly'] and (not snapshots['weekly'] or
                            snapshots['weekly'][0][1].isocalendar()[1] != now().isocalendar()[1] or
                            now() - snapshots['weekly'][0][1] > timedelta(days=7)):
-        take_snap(filesystem, 'weekly')
+        take_snap(filesystem, 'weekly', recursive)
 
     if conf['daily'] and (not snapshots['daily'] or
                           snapshots['daily'][0][1].day != now().day or
                           now() - snapshots['daily'][0][1] > timedelta(days=1)):
-        take_snap(filesystem, 'daily')
+        take_snap(filesystem, 'daily', recursive)
 
     if conf['hourly'] and (not snapshots['hourly'] or
                            snapshots['hourly'][0][1].hour != now().hour or
                            now() - snapshots['hourly'][0][1] > timedelta(hours=1)):
-        take_snap(filesystem, 'hourly')
+        take_snap(filesystem, 'hourly', recursive)
 
     if conf['frequent'] and (not snapshots['frequent'] or
                              snapshots['frequent'][0][1].minute != now().minute or
                              now() - snapshots['frequent'][0][1] > timedelta(minutes=1)):
-        take_snap(filesystem, 'frequent')
+        take_snap(filesystem, 'frequent', recursive)
 
 
 def take_config(config):
@@ -164,9 +168,15 @@ def take_config(config):
         else:
             # Take recursive snapshot of parent filesystem
             take_filesystem(children[0], conf)
-            # Take snapshot of all children that don't have all snapshots yet
-            for child in children[1:]:
-                take_filesystem(child, conf)
+
+            recursive = True
+            if 'recursive' in conf and conf['recursive'] is not None and conf['recursive'] == False:
+                recursive = False
+
+            if recursive == True:
+                # Take snapshot of all children that don't have all snapshots yet
+                for child in children[1:]:
+                    take_filesystem(child, conf)
         finally:
             if ssh:
                 ssh.close()
